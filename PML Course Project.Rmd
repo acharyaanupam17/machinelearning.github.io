@@ -1,0 +1,145 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Anupam Acharya"
+date: "07/04/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Executive Summary
+The data contains of 1. Training Set - 19622 observations and 160 variables, and 2. Test Set 20 observations and 160 variables.  
+While it is usually quantified how much activity a person does using wearables, it is generally not mentioned how well the person is doing it. Data collected from fitbit, Jawbone Up and Nike Fuelband were mapped to five different ways of doing a particular activity. Alongwith the classe, 159 other variable data were collected for the same activity such as Accelerometer data, Gyroscope data, Yaw data etc.  
+This project's objective is to accurately identify which classe a set of data belong to based on the 159 other variables. Once we finalised on a model, the model will then be applied to the test data to identify the classe of each of the 20 data.
+This report does an exploratory analysis of the given data, finds correlation among the different variables and then fits three different models. It performs in-sample accuracy tests and out of sample tests to identify the best model. This model is then used to identify the classe in each data in the test set.
+
+## Analysis
+Loading the necessary libraries that will be required for the analysis.
+```{r libraries, warning=FALSE, echo = FALSE}
+library(caret)
+library(ggplot2)
+library(knitr)
+library(gbm)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(corrplot)
+```
+
+The training and test data is downloaded from the location provided. The variables in the given data are shown below.  
+```{r data_download, cache = TRUE}
+training <- read.csv("C:/Users/achar/Documents/R/Predictive Machine Learning/pml-training.csv")
+testing <- read.csv("C:/Users/achar/Documents/R/Predictive Machine Learning/pml-testing.csv")
+names(training)
+```  
+
+The first few lines of the data set are displayed below to get a sense of the data. We can clearly see that a lot of the variables contain NAs. Such variables if used as predictors will give errors and erroneous results.  
+```{r data_summary2, cache = TRUE}
+head(training, 3)
+```
+## Exploratory Analysis
+A plot of the classe variable to see the different levels and how the data is spread out among the levels.  
+```{r plot, cache = TRUE}
+plot(training$class, col = "green", main = "Training Set - Classe Data", xlab = "Classe Labels",  ylab = "Number of Observations")
+```
+
+## Data Cleaning
+First we select those variables where there the NAs are less than 20 (out of 19622) in the training data set. We also select the variables where the NAs are less than 2 (out of 20) in the test data set. Thereafter, we remove the first 7 columns which give us the name, timestamp, new window and num window. These variables cannot act as good predictors. Then we remove those variables where the variables have near zero variance.  
+Then the training data set is divided into training and validation datasets in the ratio of 3:1. **The validation dataset will be used to calculate the OUT-OF-SAMPLE errors in the model fit. The validation dataset has been used for CROSS VALIDATION.**   
+
+```{r data_cleaning, cache = TRUE}
+newtrain <- training[,colSums(is.na(training))<20]
+newtrain <- newtrain[ , -c(1:7)]
+newtest <- testing[,colSums(is.na(testing))<2]
+newtest <- newtest[ , -c(1:7)]
+NZV <- nearZeroVar(newtrain)
+newtrain <- newtrain[ ,-NZV]
+inTrain <- createDataPartition(newtrain$classe, p = 3/4)[[1]]
+final_training <- newtrain[ inTrain,]
+final_validate <- newtrain[ -inTrain,]
+```
+After cleaning the data, only 53 variables remain in the training and test data sets.  
+
+Now we perform a check if the 53 variables in the final training dataset are available in the test set as well.  
+```{r check, cache = FALSE}
+check <- names(newtrain) == names(newtest)
+sum(check)
+```
+We see that 52 variables are the same in the training, validation and test set. The only variable that is different is the classe variable which is written as Problem ID in the test set. Hence we are good to go.     
+
+We then find the correlation among the variables. The diagonal of the correlation matrix is set to zero because it gives the correlation between the same variable. The variables which have the highest correlation more than 0.8 is shown below.  
+```{r correlation, cache = TRUE}
+M <- abs(cor(final_training[,-53]))
+diag(M) <- 0
+highly_correlated <- findCorrelation(M, cutoff = 0.8)
+names(final_training[highly_correlated])
+```
+
+We can also see a correlation plot below to view the correlation between variables. The deeper colours are the variables with higher correlation close to -1 or 1. I have intentionally made the diagonal 0 because they are the correlation with the same variable and hence have a value of 1.  
+```{r plot2, cache = TRUE}
+N <- cor(final_training[,-53])
+diag(N) <- 0
+corrplot(M, order = "FPC", method = "color", type = "upper", tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+### Out of Sample Error  
+The out of sample error is defined as 1 - Accuracy of the Validation Set. It gives us the expected error when we fit a trained model on a new set of data.
+
+
+## Models   
+We fit 3 different models on the training data and checked for the in-sample and out-of-sample accuracies for all three models below. I tried out other models like the Linear Regression and GLM but did not include them because they had low accuracy and did not value to the report. The three models are:    
+
+### Model 1 - Classification Tree
+```{r ct, cache = TRUE}
+set.seed(504)
+mod_ct <- rpart(classe ~ ., data=final_training, method="class")
+fancyRpartPlot(mod_ct)
+
+colnames(newtest)[53] <- "classe"
+test_mod_ct <- predict(mod_ct, newdata = final_validate, type = "class")
+conf_mat_ct <- confusionMatrix(test_mod_ct, final_validate$classe)
+conf_mat_ct$table
+conf_mat_ct$overall[1]
+```
+Classification Tree has an overall accuracy of **74%** with the Validation Set. **The out of sample error rate is about 26%.**
+
+### Model 2 - Random Forest
+```{r rf, cache = TRUE}
+set.seed(504)
+fitControl <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mod_rf <- train(classe ~ ., data = final_training, method = "rf", trControl = fitControl)
+confusionMatrix(mod_rf)
+
+test_mod_rf <- predict(mod_rf, newdata = final_validate)
+conf_mat_rf <- confusionMatrix(test_mod_rf, final_validate$classe)
+conf_mat_rf$table
+conf_mat_rf$overall[1]
+```  
+Random Forest has an in-sample accuracy of 99.05% and an out of sample accuracy of **99.2%**. **The expected out of sample error is 1 - Accuracy or 0.80%.**  
+
+
+### Model 3 - Gradient Boosting Machines
+```{r gbm, cache = TRUE}
+set.seed(504)
+mod_gbm <- train(classe ~ ., data = final_training, method = "gbm", trControl = fitControl, verbose = FALSE)
+confusionMatrix(mod_gbm)
+
+test_mod_gbm <- predict(mod_gbm, newdata = final_validate)
+conf_mat_gbm <- confusionMatrix(test_mod_gbm, final_validate$classe)
+conf_mat_gbm$table
+conf_mat_gbm$overall[1]
+```  
+GBM has an in-sample accuracy of 95.85% and an out of sample accuracy of **96.08**. The out of sample error rate is **3.92%**.   
+
+Further I tried the Ensemble method, which took a lot of time to run but did not increase the accuracy much. Hence I dropped the idea and stuck to the Random Forest method which provided accurate results.  
+
+## Predictions for Test Set
+The predictions for the test set were calculated based on our Random Forest model. The Random Forest model had the highest in-sample accuracy, highest out-of-sample accuracy and lowest out-of-sample error rate. Therefore, it was the best choice of model to predict the classe in the Test Set of 20 data points. The predictions are given below. This prediction is expected to be 99.2% accurate and an expected out of sample error rate of 0.2%.   
+ 
+```{r prediction, cache = TRUE}
+newtest$classe <- predict(mod_rf, newdata = newtest)
+newtest$classe
+```
+
+=====================================================================================================================
